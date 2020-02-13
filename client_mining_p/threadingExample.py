@@ -8,7 +8,7 @@ import time
 import psutil
 
 
-def proof_of_work(block):
+def proof_of_work(block, thread_number, valid_guesses):
     """
     Simple Proof of Work Algorithm
     Stringify the block and look for a proof.
@@ -25,14 +25,14 @@ def proof_of_work(block):
     #     # TODO
 
     block_string = json.dumps(block, sort_keys = True)
-    guess = 0
+    guess = thread_number * 1000000000
     not_valid = True
     while not_valid:
         if valid_proof(block_string, guess):
             not_valid = False
         else:
             guess += 1
-    return guess
+    valid_guesses[thread_number] = guess
 
 
 def valid_proof(block_string, proof):
@@ -84,10 +84,28 @@ if __name__ == '__main__':
 
         threads = []
         print(f'CPU percent {psutil.cpu_percent()}')
+        manager = multiprocessing.Manager()
+        valid_guesses = manager.dict()
+        for i in range(6):
+            thread = multiprocessing.Process(target = proof_of_work,
+                                             args = (data['last_block'], i,
+                                                     valid_guesses))
+            threads.append(thread)
+            thread.start()
+        valid_guess = False
+        while not valid_guess:
+            for proc in threads:
+                if not proc.is_alive():
+                    valid_guess = True
 
-        valid_guess = proof_of_work(data["last_block"])
+        for proc in threads:
+            if proc.is_alive():
+                proc.terminate()
+                proc.join()
 
-        post_data = {"proof": valid_guess, "id": id}
+        valid_guess = valid_guesses.values()
+        proof = valid_guess[0]
+        post_data = {"proof": valid_guess[0], "id": id}
 
         r = requests.post(url = node + "/mine", json = post_data)
         data = r.json()
@@ -95,7 +113,7 @@ if __name__ == '__main__':
         # TODO: If the server responds with a 'message' 'New Block Forged'
         # add 1 to the number of coins mined and print it.  Otherwise,
         # print the message from the server.
-        if "reward" in data:
+        if data["message"] == "New Block Forged":
             count += 1
             print(
                 "You mined a block: Total number of blocks mined: " + f'{count}')
